@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rail Anomaly Detection — Live Dashboard</title>
+  <meta name="description" content="Real-time railway defect detection dashboard powered by YOLOv8 and STM32N657-DK" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  HEADER                                                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">
+      <span class="logo-icon">🚆</span>
+      <div>
+        <h1 class="logo-title">RailGuard AI</h1>
+        <p class="logo-sub">Railway Anomaly Detection System</p>
+      </div>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="status-pill" id="connection-status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="header-meta">
+      <span id="live-time" class="live-time">--:--:--</span>
+      <span class="header-badge">STM32N657-DK</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  ALERT BANNER                                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="alert-banner" id="alert-banner">
+  <span id="alert-text">Alert</span>
+  <button onclick="dismissAlert()" class="alert-dismiss">✕</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  MAIN CONTENT                                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- KPI CARDS -->
+  <section class="kpi-row" aria-label="Key metrics">
+    <div class="kpi-card" id="kpi-total">
+      <div class="kpi-icon">📊</div>
+      <div class="kpi-body">
+        <div class="kpi-value" id="kpi-total-val">0</div>
+        <div class="kpi-label">Total Detections</div>
+      </div>
+    </div>
+    <div class="kpi-card kpi-critical" id="kpi-critical">
+      <div class="kpi-icon">💥</div>
+      <div class="kpi-body">
+        <div class="kpi-value" id="kpi-critical-val">0</div>
+        <div class="kpi-label">Critical / High</div>
+      </div>
+    </div>
+    <div class="kpi-card" id="kpi-latest">
+      <div class="kpi-icon" id="kpi-latest-icon">❓</div>
+      <div class="kpi-body">
+        <div class="kpi-value" id="kpi-latest-val">—</div>
+        <div class="kpi-label">Last Detected</div>
+      </div>
+    </div>
+    <div class="kpi-card" id="kpi-conf">
+      <div class="kpi-icon">🎯</div>
+      <div class="kpi-body">
+        <div class="kpi-value" id="kpi-conf-val">—</div>
+        <div class="kpi-label">Last Confidence</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIVE DETECTION PANEL + CHARTS -->
+  <section class="grid-2col">
+
+    <!-- LIVE DETECTION CARD -->
+    <div class="card live-card">
+      <div class="card-header">
+        <h2 class="card-title">🔴 Live Detection</h2>
+        <span class="pulse-badge">LIVE</span>
+      </div>
+      <div class="live-display" id="live-display">
+        <div class="live-idle">
+          <div class="idle-icon">📡</div>
+          <p class="idle-text">Waiting for detections...</p>
+          <p class="idle-sub">Connect STM32N657-DK and run bridge.py</p>
+          <button class="btn-demo" onclick="requestDemo()" id="demo-btn">
+            ▶ Run Demo Mode
+          </button>
+        </div>
+      </div>
+
+      <!-- Confidence meter -->
+      <div class="conf-section" id="conf-section" style="display:none">
+        <div class="conf-label-row">
+          <span>Confidence</span>
+          <span id="conf-pct">0%</span>
+        </div>
+        <div class="conf-bar-bg">
+          <div class="conf-bar-fill" id="conf-bar"></div>
+        </div>
+      </div>
+
+      <!-- Bbox info -->
+      <div class="bbox-info" id="bbox-info" style="display:none">
+        <span class="bbox-label">BBox</span>
+        <span class="bbox-val" id="bbox-val">—</span>
+      </div>
+    </div>
+
+    <!-- PIE CHART: defect distribution -->
+    <div class="card chart-card">
+      <div class="card-header">
+        <h2 class="card-title">📊 Defect Distribution</h2>
+      </div>
+      <div class="chart-wrapper pie-wrapper">
+        <canvas id="pieChart" aria-label="Defect type distribution pie chart"></canvas>
+      </div>
+      <div class="pie-legend" id="pie-legend"></div>
+    </div>
+
+  </section>
+
+  <!-- BAR CHART: detections per hour -->
+  <div class="card chart-card full-width">
+    <div class="card-header">
+      <h2 class="card-title">📈 Detections Per Hour</h2>
+      <span class="chart-note">Last 12 hours</span>
+    </div>
+    <div class="chart-wrapper bar-wrapper">
+      <canvas id="barChart" aria-label="Hourly detection count bar chart"></canvas>
+    </div>
+  </div>
+
+  <!-- HISTORY TABLE -->
+  <div class="card full-width">
+    <div class="card-header">
+      <h2 class="card-title">🗂️ Detection History</h2>
+      <div class="table-controls">
+        <input type="text" id="filter-input" placeholder="Filter by class..." class="filter-input" oninput="filterTable()" />
+        <button class="btn-clear" onclick="clearHistory()">Clear</button>
+      </div>
+    </div>
+    <div class="table-container">
+      <table class="history-table" id="history-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Time</th>
+            <th>Defect Type</th>
+            <th>Confidence</th>
+            <th>Severity</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr class="empty-row">
+            <td colspan="6">No detections yet. Run bridge.py or click Demo Mode.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  NOTIFICATION TOAST                                         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>
