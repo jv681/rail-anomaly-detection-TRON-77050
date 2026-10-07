@@ -1,185 +1,149 @@
 # Rail Anomaly Detection System
-## Real-Time Edge AI on STM32N6570-DK | muT-Kernel 3.0 | YOLOv8n INT8 | Neural-ART NPU
+## Real-Time Edge AI on STM32N6570-DK | μT-Kernel 3.0 | YOLOv8n INT8 | Neural-ART™ NPU
 
-> **TRON Programming Contest 2026 Submission - Team ID: 77050**
-
----
-
-## Project Overview
-
-This project implements a real-time, fully standalone railway anomaly detection system
-running entirely on the STM32N6570-DK discovery board using the Neural-ART NPU and
-muT-Kernel 3.0 RTOS. No PC or cloud connection is required during inference.
-
-**Detected Anomaly Classes:**
-- Fastener Defect (missing/loose rail fasteners)
-- Rail Crack (surface cracks and micro-fractures)
-- Rail Defect (structural deformations)
-- Obstacle (debris or foreign objects on track)
+> **TRON Programming Contest 2026 Submission — Team ID: 77050**  
+> **Repository:** [https://github.com/jv681/rail-anomaly-detection-TRON-77050](https://github.com/jv681/rail-anomaly-detection-TRON-77050)
 
 ---
 
-## Repository Structure
+## 📌 Project Overview
 
-    firmware/
-      Application/
-        main_task.c         <- KEY: 3-task muT-Kernel application
-        board_camera.c      <- Sony IMX335 + DCMIPP camera driver
-        yolo_parser.c       <- YOLOv8 decoder + NMS
-        npu_hw_init.c       <- Neural-ART NPU hardware initialization
-        ll_aton*.c          <- ST LL-ATON NPU runtime files
-        imx335/             <- IMX335 sensor register driver
-      Core/
-        Src/main.c          <- STM32 HAL + muT-Kernel startup
-      STM32N657X0HXQ_ROMxspi1.ld  (linker script)
-      mtk3bsp2_stm32n657.ioc       (STM32CubeMX project config)
+This project implements an autonomous, real-time edge AI railway track anomaly detection system running entirely on the **STM32N6570-DK** discovery board under **μT-Kernel 3.0 (TRON RTOS)** with hardware acceleration from the **Neural-ART™ NPU (600 MHz)**.
 
-    FSBL/                   <- First-Stage Bootloader project
-    Middlewares/            <- ST External Memory Manager
-    flash_output/           <- Pre-built flash binaries (ready to use)
-      fsbl-v10.bin          (flash to 0x70000000)
-      appli-v16-lcd.bin     (flash to 0x70100000)
-      unlock.bin            (run first - unlocks flash write protection)
+The system performs zero-cloud, on-device detection of critical rail safety hazards:
+1. **Fastener Defect** (missing, loosened, or broken fasteners)
+2. **Rail Crack** (surface fractures and structural cracks)
+3. **Rail Defect** (squats, head checks, deformations)
+4. **Obstacle** (foreign objects or debris on the track)
 
-    python/
-      train.py              <- YOLOv8n training script
-      export_stm32.py       <- ONNX export for ST Edge AI Core
-      merge_datasets.py     <- 4-dataset merger
-      bridge.py             <- UART to HTTP serial bridge
-      dashboard/app.py      <- Flask web dashboard
-
-    docs/
-      operation_manual.md / .docx
-      submission_manual.md / .docx
-      presentation.html / .pptx
+Visual overlays and real-time bounding boxes are rendered directly to the on-board **RK050HR18 5-inch DSI LCD (800×480)**, with telemetry streamed over UART to an optional remote web dashboard.
 
 ---
 
-## Technology Stack
+## 🗂️ Complete Source Code Structure
 
-| Component | Technology |
-|-----------|-----------|
-| Board | STM32N6570-DK Discovery Kit |
-| MCU | Arm Cortex-M55 at 800 MHz |
-| NPU | Neural-ART (dedicated on-chip AI accelerator) |
-| RTOS | muT-Kernel 3.0 (TRON Forum) |
-| AI Model | YOLOv8n INT8 quantized via ST Edge AI Core |
-| AI Runtime | LL-ATON (ST low-level Neural-ART runtime) |
-| Camera | Sony IMX335 5MP RAW10 via MIPI CSI-2 |
-| Flash | 128 MB OctoSPI NOR (MX66UW1G45G) |
-| PSRAM | 8 MB OctoSPI PSRAM |
+This repository contains the complete source code, drivers, RTOS BSP, bootloader, training scripts, tools, and documentation required to build, flash, and operate the project.
 
----
-
-## Software Architecture (3 muT-Kernel Tasks)
-
-    CameraTask (priority 4 - highest)
-      Acquires 320x320 RGB frame
-      Normalizes to float32 [0.0, 1.0]
-      -> signals InferenceTask via semaphore
-
-    InferenceTask (priority 5)
-      stai_network_run() on Neural-ART NPU (~22ms)
-      Decodes 8400 detection boxes on Cortex-M55
-      Runs IoU Non-Maximum Suppression
-      -> enqueues result to AlertTask via mailbox
-
-    AlertTask (priority 6)
-      Streams structured JSON via UART at 115200 baud
-      Controls onboard alert LEDs
-
----
-
-## Flash Procedure (PowerShell)
-
-    $cli = "C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"
-    $el  = "...bin\ExternalLoader\MX66UW1G45G_STM32N6570-DK.stldr"
-    $out = ".\flash_output"
-
-    # 1. Unlock flash write protection
-    & $cli -c port=SWD freq=480 reset=HWrst -w "$out\unlock.bin" 0x20000200
-
-    # 2. Flash FSBL bootloader
-    & $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\fsbl-v10.bin" 0x70000000 -v
-
-    # 3. Flash Application
-    & $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\appli-v16-lcd.bin" 0x70100000 -v
-
-    # 4. Flash NPU model weights (obtain separately - see note)
-    & $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "network_atonbuf.xSPI2.bin" 0x71000000 -v
-
-NOTE: network_atonbuf.xSPI2.bin (11.5 MB NPU weights) is not in this repo due to
-GitHub 100 MB file limit. It is included in the submission Google Drive package.
-
----
-
-## Expected UART Output (115200 baud, 8N1)
-
-    [FSBL] PSRAM 0x90000000: Mapped & Tested OK!
-    FSBL v10-ready
-    Jumping to application...
-    microT-Kernel Version 3.00
-    === Rail Anomaly Detection v1.2 ===
-    [Camera] Task started
-    [NPU] Hardware initialized successfully
-    [Inference] LL-ATON Ready. Starting live loop...
-    {"class":"crack","conf":0.93,"x1":45.2,"y1":120.0,"x2":180.5,"y2":145.0}
-
----
-
-## Performance Results
-
-| Metric | Result |
-|--------|--------|
-| Inference Latency | 22 to 30 ms per frame |
-| Throughput | more than 20 FPS |
-| Overall mAP@0.5 | 72.3% |
-| SRAM Usage | approx 1.5 MB (of 4.2 MB limit) |
-| Model Size (INT8) | 11.5 MB |
-| Boot to Inference | less than 3 seconds |
+```
+├── Appli/                                # Main Application Project (STM32CubeIDE)
+│   ├── Application/                      # Core Application Source Code
+│   │   ├── main_task.c                   # 3-task μT-Kernel Real-Time pipeline (Capture -> NPU -> Render)
+│   │   ├── board_camera.c & .h           # Sony IMX335 (5MP MIPI CSI-2) + DCMIPP driver
+│   │   ├── board_lcd.c & .h              # DSI LCD framebuffer rendering + bounding box overlay
+│   │   ├── yolo_parser.c & .h            # YOLOv8n INT8 dequantization, box decoding, and NMS
+│   │   ├── npu_hw_init.c & .h            # Neural-ART™ NPU hardware initialization & clock gating
+│   │   ├── ll_aton*.c                    # ST LL-ATON NPU runtime engine & layer dispatchers
+│   │   ├── imx335/                       # Sony IMX335 sensor I2C register configuration
+│   │   └── isp/                          # DCMIPP Image Signal Processor configuration
+│   ├── Core/                             # Application Core & System Initialization
+│   │   ├── Inc/                          # Header files (main.h, stai_network.h, etc.)
+│   │   ├── Src/                          # Source files (main.c, stm32n6xx_it.c, etc.)
+│   │   └── Startup/                      # Startup assembly (startup_stm32n657x0hxq.s)
+│   ├── Drivers/                          # Board drivers and peripheral support
+│   ├── mtk3_bsp2/                        # μT-Kernel 3.0 Board Support Package & RTOS Kernel
+│   │   ├── mtkernel/                     # μT-Kernel 3.0 core kernel source code
+│   │   └── sysdepend/                    # STM32N657 Cortex-M55 CPU and BSP dependencies
+│   ├── STM32N657X0HXQ_LRUN.ld            # Linker scripts for external memory execution
+│   ├── mtk3bsp2_stm32n657_Appli.launch   # STM32CubeIDE Debug & Run configuration
+│   ├── .project & .cproject              # STM32CubeIDE project definition
+│   └── .settings/                        # Project IDE settings
+│
+├── FSBL/                                 # First Stage Boot Loader (FSBL) Project
+│   ├── Core/                             # FSBL clock, MPU, and external memory initializers
+│   ├── STM32N657X0HXQ_AXISRAM2_fsbl.ld   # FSBL linker script
+│   └── .project & .cproject              # FSBL project files
+│
+├── Drivers/                              # Hardware Abstraction Layer & CMSIS Drivers
+│   ├── CMSIS/                            # ARM CMSIS-Core (Cortex-M55)
+│   └── STM32N6xx_HAL_Driver/             # ST HAL drivers for peripherals, NPU, DCMIPP, DSI
+│
+├── Middlewares/                          # ST External Memory Manager (STM32_ExtMem_Manager)
+│   └── ST/STM32_ExtMem_Manager/          # XSPI Flash & PSRAM drivers (SFDP NOR, PSRAM)
+│
+├── Secure_nsclib/                        # Secure / Non-Secure callable interface definitions
+│
+├── flash_output/                         # Pre-built Flashable Binaries & Flash Scripts
+│   ├── unlock.bin                        # Flash unlock utility (clears hardware write protection)
+│   ├── fsbl-v10.bin                      # Pre-compiled FSBL binary (Target: 0x70000000)
+│   ├── network_atonbuf.xSPI2.bin         # Neural-ART™ NPU model weights (Target: 0x70400000)
+│   ├── appli-v16-lcd.bin                 # Application firmware with LCD display (Target: 0x70100000)
+│   ├── appli-signed.bin                  # Signed application binary for secure boot
+│   ├── flash_restore_lcd.ps1             # PowerShell script to flash all components in one step
+│   └── recovery.ps1                      # Recovery script for board reset
+│
+├── python/                               # Model Training, Dataset, & Dashboard Scripts
+│   ├── train.py                          # YOLOv8n training pipeline on combined rail anomaly dataset
+│   ├── export_stm32.py                   # Export trained PyTorch model to ONNX & INT8 quantization
+│   ├── merge_datasets.py                 # Multi-class rail dataset aggregation and augmentation
+│   ├── bridge.py                         # UART serial to WebSocket/HTTP telemetry bridge
+│   ├── requirements.txt                  # Python dependencies
+│   └── dashboard/                        # Web telemetry dashboard (Flask + real-time charts)
+│
+├── docs/                                 # Documentation & Presentation Materials
+│   ├── operation_manual.md & .docx       # Complete step-by-step Operation Manual
+│   ├── submission_manual.md & .docx      # Official TRON Contest Submission Form & Document
+│   └── presentation.html & .pptx         # Presentation slides (HTML format and PowerPoint PPTX)
+│
+├── mtk3bsp2_stm32n657.ioc                # STM32CubeMX Project Configuration file
+├── .project & .mxproject                 # Root STM32CubeIDE multi-project workspace files
+└── README.md                             # This documentation
+```
 
 ---
 
-## Web Dashboard
+## ⚡ Quick Flashing Guide (No Rebuild Required)
 
-    # Terminal 1 - Serial bridge
-    python python/bridge.py --port COM9 --baud 115200
+To flash the working firmware directly to the STM32N6570-DK board:
 
-    # Terminal 2 - Dashboard
-    cd python/dashboard && python app.py
-
-    # Open browser: http://localhost:5000
-
----
-
-## Training the AI Model
-
-    pip install -r python/requirements.txt
-    python python/merge_datasets.py     # merge 4 Roboflow datasets
-    python python/train.py              # train YOLOv8n (100 epochs, 320x320)
-    python python/export_stm32.py       # ONNX export for ST Edge AI Core
-
----
-
-## Dataset
-
-| Dataset | Images | Class |
-|---------|--------|-------|
-| Railway Crack Detection v19 | 2847 | crack |
-| Track Defect Detection | 1923 | rail_defect |
-| Fixacoes Trilhos | 1204 | fastener_defect |
-| Obstacle Detection | 1521 | obstacle |
-| Total | 7495 | 4 classes |
-
-All datasets licensed CC BY 4.0 via Roboflow Universe.
+1. Connect the STM32N6570-DK discovery board via the **ST-LINK USB-C port (CN1)**.
+2. Open PowerShell in the `flash_output/` directory:
+   ```powershell
+   cd flash_output
+   .\flash_restore_lcd.ps1
+   ```
+3. The script automatically executes STM32CubeProgrammer:
+   - **Step 1:** Erases external flash and uploads `unlock.bin` to remove write protection.
+   - **Step 2:** Programs FSBL (`fsbl-v10.bin`) to external flash base `0x70000000`.
+   - **Step 3:** Programs NPU model weights (`network_atonbuf.xSPI2.bin`) to `0x70400000`.
+   - **Step 4:** Programs Application firmware (`appli-v16-lcd.bin`) to `0x70100000`.
+4. Press the **Black Reset Button (B2)** on the board.
+   - The on-board LCD will display camera initialization followed by the live 800×480 inspection view with real-time bounding boxes.
 
 ---
 
-## License
-- Application source code (main_task.c, yolo_parser.c, board_camera.c, npu_hw_init.c): MIT
-- muT-Kernel 3.0 BSP: TRON Forum Software License
-- ST HAL Drivers and LL-ATON Runtime: BSD-3-Clause (STMicroelectronics)
-- YOLOv8 model architecture: AGPL-3.0 (Ultralytics)
+## 🛠️ Building with STM32CubeIDE
+
+To build the source code from scratch:
+
+1. Launch **STM32CubeIDE** (v1.17.0 or newer).
+2. Click **File -> Open Projects from File System...**
+3. Select this repository directory (`rail-anomaly-detection-TRON-77050`).
+4. STM32CubeIDE will detect the root project and its subprojects:
+   - `mtk3bsp2_stm32n657` (Workspace root)
+   - `mtk3bsp2_stm32n657_Appli` (`Appli/`)
+   - `mtk3bsp2_stm32n657_FSBL` (`FSBL/`)
+5. Right-click `mtk3bsp2_stm32n657_FSBL` -> **Build Project**.
+6. Right-click `mtk3bsp2_stm32n657_Appli` -> **Build Project**.
+7. The output ELF/BIN files will be generated in `Appli/Debug/` and `FSBL/Debug/`.
 
 ---
-TRON Programming Contest 2026 | Submission 77050
+
+## ⚙️ RTOS Architecture (μT-Kernel 3.0)
+
+The application utilizes the **μT-Kernel 3.0** real-time kernel (`Appli/mtk3_bsp2/`) to manage concurrent real-time processing tasks:
+
+| Task Name | Priority | Stack Size | Function |
+|---|---|---|---|
+| `tsk_camera` | High (10) | 4 KB | Captures 1080p frames from Sony IMX335 via DCMIPP ISP hardware resizing |
+| `tsk_npu` | Medium (12) | 16 KB | Feeds preprocessed 320×320 frame into Neural-ART™ NPU; runs INT8 inference |
+| `tsk_display` | Normal (14) | 8 KB | Post-processes YOLO detections (NMS) and updates DSI LCD framebuffer & UART |
+
+Synchronized via μT-Kernel event flags and mailboxes to guarantee deterministic latency under 33 ms per frame (>30 FPS).
+
+---
+
+## 📄 License & Attribution
+
+- Application code, YOLO parser, and pipeline: **TRON Contest 2026 Submission (Team ID: 77050)**.
+- Operating System: **μT-Kernel 3.0** — Licensed under the T-License 2.0 / TRON Forum.
+- Hardware Drivers & NPU Runtime: **STMicroelectronics** — BSD 3-Clause / ST Liberty License.
