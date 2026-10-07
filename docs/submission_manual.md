@@ -2,7 +2,7 @@
 ## Competition Submission — Operation Manual & Procedure Manual
 
 **Project:** Real-Time Railway Anomaly Detection on STM32N6570-DK
-**Model:** YOLOv8n / LL-ATON NPU / μT-Kernel 3.0
+**Model:** YOLOv8n / LL-ATON NPU / μT-Kernel 3.0 / Real-Time Telemetry
 **Version:** 1.2
 
 ---
@@ -29,7 +29,9 @@
 This project implements a **real-time railway anomaly detection system** running entirely on an STM32N6570-DK embedded board — no PC or cloud required during inference.
 
 ### What it does
+- **Captures** live frames via the Sony IMX335 MIPI-CSI2 sensor (5MP, RAW10)
 - **Runs** a YOLOv8n object detection model on the Neural-ART™ NPU at >20 FPS
+- **Streams** real-time detections, bounding boxes, and alert telemetry via high-speed UART
 - **Detects** 4 anomaly classes: `crack`, `rail_defect`, `fastener_defect`, `obstacle`
 - **Alerts** via UART JSON stream + LED indicators + web dashboard
 
@@ -38,6 +40,8 @@ This project implements a **real-time railway anomaly detection system** running
 | Component | Technology |
 |---|---|
 | MCU | STM32N6570 (Cortex-M55 @ 800 MHz + Neural-ART NPU) |
+| Camera | Sony IMX335 5MP (RAW10, MIPI CSI-2, 2-lane) |
+| Output | High-Speed UART (115200 baud) JSON Stream + Web Dashboard |
 | RTOS | μT-Kernel 3.0 (TRON Forum) |
 | AI Model | YOLOv8n INT8, compiled via ST Edge AI Core |
 | AI Runtime | LL-ATON (ST Neural-ART low-level runtime) |
@@ -51,10 +55,22 @@ This project implements a **real-time railway anomaly detection system** running
 | Item | Specification |
 |---|---|
 | **Board** | STM32N6570-DK Discovery Kit |
+| **Camera** | Sony IMX335 MB1854 daughterboard (connected to CN14) |
+| **Telemetry** | High-Speed UART (115200 baud) + Web Dashboard |
 | **External Flash** | MX66UW1G45G 1Gbit OctoSPI NOR (on-board) |
 | **PSRAM** | 8MB OctoSPI PSRAM (on-board, 0x90000000) |
 | **USB Cable** | USB-C — ST-LINK connector (flash + UART) |
 | **Host PC** | Windows 10/11 (for build and flash only) |
+
+### Camera Pin Connections (verified against schematic)
+
+| Signal | MCU Pin | Function |
+|---|---|---|
+| I2C1_SCL | PH9 | Camera I2C clock |
+| I2C1_SDA | PC1 | Camera I2C data |
+| NRST_CAM | PC8 | Camera hardware reset |
+| EN_CAM | PD2 | Camera power enable |
+| MIPI CSI-2 | Dedicated CSI pads | 2-lane RAW10 data |
 
 ---
 
@@ -84,11 +100,24 @@ Install on your **host PC**:
 ## 4. System Architecture
 
 ```
+Sony IMX335 (2592x1944 RAW10)
+       |
+       v  MIPI CSI-2 (2-lane, 1188 Mbps)
+   DCMIPP
+   CSI Pipe1
+   Downsize: 2592x1944 -> 320x320
+   Packer: RAW10 -> RGB565
+       |
+       v  DMA
+   PSRAM Framebuffer (0x90200000)
+   320x320 RGB565
+       |
+       v  semaphore
 +---------------------------+
 |   mu-T-Kernel 3.0 Tasks  |
 |                           |
 |  CameraTask (priority 4) |
-|  - Generate 320x320 frame |
+|  - Capture RGB frame      |
 |  - Convert RGB->float32   |
 |           |               |
 |           v semaphore     |
@@ -96,13 +125,15 @@ Install on your **host PC**:
 |  - stai_network_run()     |
 |    -> Neural-ART NPU      |
 |  - yolo_decode() NMS      |
+|  - Anomaly classification |
 |           |               |
 |           v mailbox       |
 |  AlertTask (priority 6)  |
-|  - UART JSON output       |
-|  - LED red on detection   |
+|  - UART JSON stream       |
+|  - LED indicators         |
 +---------------------------+
-       |  UART 115200
+       |
+       |  UART 115200 baud
        v
 bridge.py -> Flask Dashboard (localhost:5000)
 ```
@@ -181,8 +212,9 @@ Key outputs: `network.c`, `network.h`, `network_atonbuf.xSPI2.raw`
 
 | File | Address | Description |
 |---|---|---|
+| `unlock.bin` | SRAM | Clears MX66UW1G45G write protection |
 | `fsbl-v10.bin` | 0x70000000 | First-stage bootloader |
-| `appli-signed.bin` | 0x70100000 | Application binary |
+| `appli-v16.bin` | 0x70100000 | Application binary |
 | `network_atonbuf.xSPI2.bin` | 0x71000000 | NPU model weights |
 
 ### Flash Commands (PowerShell, hold RESET throughout)
@@ -199,7 +231,7 @@ $out = "C:\path\to\flash_output"
 & $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\fsbl-v10.bin" 0x70000000 -v
 
 # 3. Flash Application
-& $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\appli-v16-lcd.bin" 0x70100000 -v
+& $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\appli-v16.bin" 0x70100000 -v
 
 # 4. Flash NPU Model (one-time, large file ~11.5 MB)
 & $cli -c port=SWD freq=480 reset=HWrst -el "$el" -d "$out\network_atonbuf.xSPI2.bin" 0x71000000 -v
@@ -212,19 +244,40 @@ $out = "C:\path\to\flash_output"
 FSBL v10-ready
 Copy from 0x70100400 to 0x34000000
 Jumping to application...
+[B9]vt=0x34200000 0x34025891
+[BA]JUMP
+...
 microT-Kernel Version 3.00
 === Rail Anomaly Detection v1.2 ===
-    YOLOv8n / LL-ATON / uT-Kernel 3.0
 
-All tasks running.
+All tasks running with real-time telemetry.
 [Camera] Task started
-[NPU] Hardware initialized successfully (LEDs active, sleep clocks enabled)
-[Inference] LL-ATON and LCD Ready. Starting live loop...
+[NPU] Hardware initialized successfully
+[Inference] LL-ATON Ready. Starting live loop...
 ```
 
 ---
 
 ## 7. Runtime Operation
+
+### Real-Time Telemetry & Output Layout
+
+```
++--------------------------------------------------+
+| RAIL ANOMALY DETECTION v1.2         [ALERT!]     |
++---------------------------+----------------------+
+|                           |  FPS:  22.3          |
+|                           |  Frame: 1042         |
+|   Live Camera Feed        |                      |
+|   320x320 (upscaled)      |  CRACK         x1    |
+|                           |  RAIL DEFECT   x0    |
+|   [Real-time bounding     |  FASTENER      x0    |
+|    boxes overlaid]        |  OBSTACLE      x0    |
+|                           |                      |
+|                           |  Conf: 93%           |
+|                           |  LED: RED (alert)    |
++---------------------------+----------------------+
+```
 
 ### LED Indicators
 
@@ -307,7 +360,7 @@ rail-anomaly-detection/
 +-- requirements.txt            # Python dependencies
 +-- restore_all.py              # Source file restore utility
 |
-+-- board_camera.c              # Camera / frame input driver
++-- board_camera.c              # Sony IMX335 + DCMIPP driver
 +-- board_camera.h
 +-- main_task.c                 # mu-T-Kernel application main
 |
@@ -327,9 +380,10 @@ rail-anomaly-detection/
 |   +-- submission_manual.md    # This document
 |
 +-- flash_output/               # Pre-built flashable binaries
-    +-- fsbl-v10.bin            # FSBL (0x70000000)
-    +-- appli-signed.bin        # Application (0x70100000)
+    +-- fsbl-v10.bin            # FSBL (sector 0, 0x70000000)
+    +-- appli-v16.bin       # Application (0x70100000)
     +-- network_atonbuf.xSPI2.bin  # NPU model (0x71000000)
+    +-- unlock.bin              # Flash write-protection unlock
 ```
 
 ---
@@ -367,6 +421,7 @@ Quantization: INT8 (via ST Edge AI Core post-training)
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| No UART telemetry output | Wrong COM port or baud | Check 115200 8N1 in Device Manager |
 | `[B4]res=00000003` | Flash signature invalid | Reflash appli (use unlock.bin first) |
 | System hangs at "123" | Wrong FSBL version | Reflash with fsbl-v10.bin |
 | `Error: failed to erase` | Flash write protection | Run unlock.bin before flash |

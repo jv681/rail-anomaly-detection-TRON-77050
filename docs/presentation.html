@@ -309,8 +309,8 @@
           <div class="step">
             <div class="step-num">4</div>
             <div class="step-body">
-              <h4>UART JSON Alerts</h4>
-              <p>Detection results streamed as JSON over UART 115200 → web dashboard</p>
+              <h4>UART Telemetry & Alerts</h4>
+              <p>Real-time JSON alerts, bounding boxes, and telemetry via UART to Web Dashboard</p>
             </div>
           </div>
         </div>
@@ -344,7 +344,7 @@
       <div class="arrow">→</div>
       <div class="pstep">⚙️ M55 CPU<small>NMS / Decode</small></div>
       <div class="arrow">→</div>
-      <div class="pstep">📡 UART 115200<small>JSON Alerts</small></div>
+      <div class="pstep">📡 UART Telemetry<small>+ Web Dashboard</small></div>
     </div>
     <div class="grid3" style="margin-top:20px;">
       <div class="card accent-top">
@@ -353,7 +353,7 @@
       </div>
       <div class="card green-top">
         <h3>InferenceTask <span style="color:var(--muted);font-weight:400;font-size:13px;">priority 5</span></h3>
-        <p>Runs stai_network_run() on NPU. Decodes detections. Sends results to AlertTask via mailbox.</p>
+        <p>Runs stai_network_run() on NPU. Decodes detections and dispatches real-time telemetry packets.</p>
       </div>
       <div class="card orange-top">
         <h3>AlertTask <span style="color:var(--muted);font-weight:400;font-size:13px;">priority 6</span></h3>
@@ -427,7 +427,7 @@
   <!-- SLIDE 5: Live Demo Results -->
   <div class="slide" id="slide-5">
     <div class="tag">Live Demo</div>
-    <h2>Board Output — <span class="grad">UART</span></h2>
+    <h2>Board Output — <span class="grad">UART Telemetry & Alerts</span></h2>
     <div class="cols">
       <div>
         <div class="card" style="background:var(--surface2); font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.9; padding:22px;">
@@ -436,9 +436,8 @@
           <span style="color:var(--accent2);">[BA]JUMP</span><br>
           <span style="color:var(--text);">microT-Kernel Version 3.00</span><br>
           <span style="color:var(--accent);">=== Rail Anomaly Detection v1.2 ===</span><br>
-          <span style="color:var(--muted);">    YOLOv8n / LL-ATON / uT-Kernel 3.0</span><br><br>
+          <span style="color:var(--muted);">    YOLOv8n / LL-ATON / Real-Time Telemetry</span><br><br>
           <span style="color:var(--green);">[Camera] Task started</span><br>
-          <span style="color:var(--green);">[Inference] LCD Display Initialized OK</span><br>
           <span style="color:var(--green);">[NPU] Hardware initialized successfully</span><br>
           <span style="color:var(--accent);">[Inference] Starting live loop...</span><br><br>
           <span style="color:var(--orange);">{"class":"crack","conf":0.93,...}</span><br>
@@ -447,14 +446,14 @@
       </div>
       <div>
         <div class="card accent-top" style="text-align:center; padding:28px; margin-bottom:16px;">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">LCD Display Shows</div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;">Real-Time Telemetry Stream</div>
           <div style="margin-top:16px; background:var(--bg); border-radius:10px; padding:16px; font-family:'JetBrains Mono',monospace; font-size:12px; text-align:left; line-height:1.8; color:var(--muted);">
-            <span style="color:var(--accent);">┌─ Camera Feed ─┬─ Telemetry ─┐</span><br>
-            <span>│ [live video]  │ FPS: 22.3   │</span><br>
-            <span>│ [bounding     │ CRACK  x1 🔴│</span><br>
-            <span>│  boxes]       │ DEFECT x0   │</span><br>
-            <span>│               │ Conf: 93%   │</span><br>
-            <span style="color:var(--accent);">└───────────────┴─────────────┘</span>
+            <span style="color:var(--accent);">┌─ Telemetry Stream ───────────────┐</span><br>
+            <span>│ Inference Rate: 22.3 FPS          │</span><br>
+            <span>│ Anomaly: CRACK DETECTED       🔴  │</span><br>
+            <span>│ Box: [45.2, 120.0, 180.5, 145.0]  │</span><br>
+            <span>│ Confidence: 93.4%                 │</span><br>
+            <span style="color:var(--accent);">└──────────────────────────────────┘</span>
           </div>
         </div>
         <div class="card green-top" style="padding:20px;">
@@ -497,7 +496,7 @@
           <thead><tr><th>Metric</th><th>Result</th><th>Status</th></tr></thead>
           <tbody>
             <tr><td>Inference latency</td><td>22–30 ms</td><td><span class="badge green">✓ Target met</span></td></tr>
-            <tr><td>Frame rate</td><td>20–25 FPS</td><td><span class="badge green">✓ Target met</span></td></tr>
+            <tr><td>Inference Throughput</td><td>20–25 FPS</td><td><span class="badge green">✓ Target met</span></td></tr>
             <tr><td>SRAM usage</td><td>~1.5 MB</td><td><span class="badge green">✓ &lt;4.2 MB limit</span></td></tr>
             <tr><td>Model (flash)</td><td>11.5 MB INT8</td><td><span class="badge green">✓ &lt;128 MB</span></td></tr>
             <tr><td>Boot time</td><td>~3 seconds</td><td><span class="badge green">✓ Target met</span></td></tr>
@@ -560,7 +559,7 @@ http://localhost:5000
     <div class="grid2" style="margin-top:20px; gap:20px;">
       <div class="card accent-top">
         <h3>📂 Embedded Firmware (C)</h3>
-        <pre style="margin-top:12px; font-size:11.5px; padding:14px;">board_camera.c     ← Camera / frame input driver
+        <pre style="margin-top:12px; font-size:11.5px; padding:14px;">board_camera.c     ← IMX335 + DCMIPP driver
 mtkernel_app/
   main_task.c      ← Camera/Inference/Alert tasks
   yolo_parser.c    ← YOLOv8 decoder + NMS
@@ -578,8 +577,9 @@ dashboard/app.py   ← Flask web server</pre>
         <h3>⚡ Pre-built Binaries</h3>
         <pre style="margin-top:12px; font-size:11.5px; padding:14px;">flash_output/
   fsbl-v10.bin      ← 0x70000000
-  appli-signed.bin  ← 0x70100000
-  network_atonbuf   ← 0x71000000</pre>
+  appli-v16.bin ← 0x70100000
+  network_atonbuf   ← 0x71000000
+  unlock.bin        ← flash utility</pre>
       </div>
       <div class="card" style="border-top:3px solid var(--accent2);">
         <h3>📄 Documentation</h3>
@@ -615,7 +615,7 @@ requirements.txt      ← Python deps</pre>
     </div>
     <div class="card" style="margin-top:24px; background: rgba(59,130,246,.06); border-color:var(--accent); text-align:center; padding:24px;">
       <p style="font-size:18px; font-weight:600;">
-        STM32N6570-DK · YOLOv8n INT8 · μT-Kernel 3.0 · Neural-ART NPU
+        STM32N6570-DK · YOLOv8n INT8 · μT-Kernel 3.0 · Neural-ART NPU · Sony IMX335
       </p>
       <p style="color:var(--muted); margin-top:8px;">All source code, binaries, and documentation included in submission package.</p>
     </div>
